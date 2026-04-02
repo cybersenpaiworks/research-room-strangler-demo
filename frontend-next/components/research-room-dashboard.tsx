@@ -49,6 +49,14 @@ const formatClock = (value: string | null): string => {
   });
 };
 
+const isTransientNetworkError = (message: string): boolean => (
+  /networkerror|failed to fetch|fetch resource|load failed|network request failed|xhr poll error/i.test(message)
+);
+
+const formatTransientMessage = (message: string, fallback: string): string => (
+  isTransientNetworkError(message) ? fallback : message
+);
+
 export function ResearchRoomDashboard() {
   const sessionId = DEFAULT_SESSION_ID;
   const [legacySession, setLegacySession] = useState<LegacySessionPayload | null>(null);
@@ -60,6 +68,7 @@ export function ResearchRoomDashboard() {
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'live' | 'disconnected'>('connecting');
   const [isSimulating, setIsSimulating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [transientMessage, setTransientMessage] = useState<string | null>(null);
 
   const buildUrl = useCallback((path: string) => `${getGatewayBaseUrl()}${path}`, []);
 
@@ -75,6 +84,7 @@ export function ResearchRoomDashboard() {
 
       const payload = (await response.json()) as LegacySessionPayload;
       setLegacySession(payload);
+      setTransientMessage(null);
     } finally {
       setLastLegacyCheckAt(new Date().toISOString());
     }
@@ -91,6 +101,7 @@ export function ResearchRoomDashboard() {
 
     const payload = (await response.json()) as DemoEvent[];
     setDemoEvents(payload);
+    setTransientMessage(null);
   }, [buildUrl, sessionId]);
 
   const loadGatewaySession = useCallback(async () => {
@@ -106,6 +117,7 @@ export function ResearchRoomDashboard() {
       const payload = (await response.json()) as GatewaySessionPayload;
       setGatewaySession(payload);
       setGatewayUpstream(response.headers.get('X-Upstream-Service') ?? payload.source);
+      setTransientMessage(null);
     } finally {
       setLastGatewayCheckAt(new Date().toISOString());
     }
@@ -114,7 +126,9 @@ export function ResearchRoomDashboard() {
   useEffect(() => {
     const pollLegacySnapshot = () => {
       void loadLegacySession().catch((error: Error) => {
-        setErrorMessage(error.message);
+        setTransientMessage(
+          formatTransientMessage(error.message, 'Legacy polling briefly failed during the refresh cycle. Retrying...'),
+        );
       });
     };
 
@@ -129,14 +143,18 @@ export function ResearchRoomDashboard() {
 
   useEffect(() => {
     void loadDemoEvents().catch((error: Error) => {
-      setErrorMessage(error.message);
+      setTransientMessage(
+        formatTransientMessage(error.message, 'The modern event feed is reconnecting. Retrying...'),
+      );
     });
   }, [loadDemoEvents]);
 
   useEffect(() => {
     const pollGatewaySession = () => {
       void loadGatewaySession().catch((error: Error) => {
-        setErrorMessage(error.message);
+        setTransientMessage(
+          formatTransientMessage(error.message, 'The gateway route is switching upstreams. Retrying...'),
+        );
       });
     };
 
@@ -160,6 +178,7 @@ export function ResearchRoomDashboard() {
 
     socket.on('connect', () => {
       setSocketStatus('live');
+      setTransientMessage(null);
     });
 
     socket.on('disconnect', () => {
@@ -168,7 +187,9 @@ export function ResearchRoomDashboard() {
 
     socket.on('connect_error', (error) => {
       setSocketStatus('disconnected');
-      setErrorMessage(error.message);
+      setTransientMessage(
+        formatTransientMessage(error.message, 'The realtime channel is reconnecting after the gateway change.'),
+      );
     });
 
     socket.on('demo:event', (event: DemoEvent) => {
@@ -198,6 +219,8 @@ export function ResearchRoomDashboard() {
 
       const payload = (await response.json()) as DemoEvent;
       setDemoEvents((current) => upsertDemoEvent(current, payload));
+      setErrorMessage(null);
+      setTransientMessage(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unexpected simulation error.');
     } finally {
@@ -270,6 +293,12 @@ export function ResearchRoomDashboard() {
       {errorMessage ? (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {transientMessage ? (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          {transientMessage}
         </div>
       ) : null}
 

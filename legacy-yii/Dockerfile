@@ -4,6 +4,8 @@ WORKDIR /app
 
 RUN docker-php-ext-install pdo pdo_mysql
 
+ENV PHP_CLI_SERVER_WORKERS=4
+
 COPY . .
 
 EXPOSE 8080

@@ -70,9 +70,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "php -r \"exit(@file_get_contents('http://127.0.0.1:8080/health') ? 0 : 1);\""]
       interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
     expose:
       - "8080"
     networks:
