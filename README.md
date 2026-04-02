@@ -2,6 +2,8 @@
 
 Portfolio-ready demo of a migration from a synchronous PHP/Yii read path to a modern Node.js/TypeScript + Next.js experience without changing the public URL.
 
+![Dashboard preview](./browser-validation.png)
+
 ## Why this repo exists
 
 This PoC was built to make one migration story easy to demonstrate in an interview:
