@@ -91,6 +91,13 @@ Switch it live with:
 
 The dashboard keeps the same public URL and shows which upstream is currently serving that route.
 
+If the stack is managed by Portainer, run the same script from a clone of this repo on the server and pass the stack name:
+
+```bash
+STACK_NAME=research-room-strangler-demo ./scripts/cutover-session-route.sh modern
+STACK_NAME=research-room-strangler-demo ./scripts/cutover-session-route.sh legacy
+```
+
 ## Useful endpoints
 
 - `GET /`
@@ -107,17 +114,53 @@ This repository is safe to publish publicly as long as you keep runtime secrets 
 Recommended approach:
 
 1. Push this repository to GitHub as a public portfolio project.
-2. In Portainer, create a stack from the Git repository.
-3. Use `docker-compose.yml` as the stack file.
-4. Populate the environment variables from [`.env.example`](.env.example) inside Portainer or through a private server-side `.env`.
-5. Put the exposed `nginx` port behind your homeserver's outer HTTPS reverse proxy.
-6. Make sure the outer proxy supports WebSocket upgrade headers for `/socket.io/`.
-7. Keep `TRUST_PROXY=true` when running behind that HTTPS layer.
+2. Keep your current infra stack as the shared edge layer:
+   `Nginx Proxy Manager`, `cloudflared`, `uptime-kuma`, `adguard`.
+3. Create a second stack just for this PoC.
+4. In Portainer, deploy this repository from Git using `docker-compose.homeserver.yml`.
+5. Populate the environment variables from [`.env.homeserver.example`](.env.homeserver.example).
+6. Attach only the PoC gateway to the existing external Docker network `proxy-network`.
+7. In Nginx Proxy Manager, create a Proxy Host pointing to:
+   `research-room-strangler-gateway:80`
+8. Enable WebSocket support in Nginx Proxy Manager.
+9. Keep `TRUST_PROXY=true` because the app is running behind your homeserver reverse proxy.
 
 Portainer-specific note:
 
-- The live cutover script rewrites [`nginx/includes/session-route.conf`](nginx/includes/session-route.conf) and reloads `nginx`.
-- For the live cutover part of the demo, make sure the deployed stack uses a checkout you can edit on the server, or keep an accessible clone of the same deployed repository on the host.
+- [`docker-compose.homeserver.yml`](docker-compose.homeserver.yml) avoids publishing host ports, so it does not collide with services like AdGuard already using `8080`.
+- The homeserver stack bakes `nginx`, MySQL seed SQL, and Postgres seed SQL into images to make Git-backed Portainer deploys more predictable.
+- The live cutover script still works and now rewrites the active config inside the running `nginx` container before reloading it.
+- If you name the Portainer stack `research-room-strangler-demo`, the cutover command can target it directly with `STACK_NAME=research-room-strangler-demo`.
+
+## Homeserver layout recommendation
+
+Use two stacks, not one giant stack:
+
+- `infra-base`
+  This is your existing shared layer: `nginx-proxy`, `cloudflared`, `uptime-kuma`, `adguard`.
+- `research-room-strangler-demo`
+  This PoC and its private app dependencies: `nginx`, `frontend-next`, `modern-node`, `legacy-yii`, `mysql`, `postgres`, `redis`.
+
+Why this split is better:
+
+- you can redeploy or remove the PoC without touching the rest of the homeserver
+- future apps can reuse the same `proxy-network`
+- your reverse proxy stays the single public edge
+- the PoC does not need host port bindings at all
+
+## Nginx Proxy Manager configuration
+
+Create a Proxy Host like this:
+
+- Domain Names: your public subdomain, for example `strangler.yourdomain.com`
+- Scheme: `http`
+- Forward Hostname / IP: `research-room-strangler-gateway`
+- Forward Port: `80`
+- Websockets Support: `on`
+- Block Common Exploits: `on`
+- SSL: request a certificate and force HTTPS
+
+If you use Cloudflare Tunnel in front of NPM, keep Cloudflared routing to NPM and let NPM continue handling the hostname match.
 
 ## Environment variables
 
