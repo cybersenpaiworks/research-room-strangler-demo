@@ -176,6 +176,8 @@ The main runtime variables are:
 - `VIDEO_TOKEN_SECRET`: mock token signing secret
 - `LEGACY_SIMULATED_DELAY_MS`: artificial legacy bottleneck used to make polling jank visible
 
+For database passwords, URL-safe values are recommended. The current stack now avoids embedding raw credentials directly into the Compose-level Postgres connection string.
+
 ## Public repo hygiene checklist
 
 Before pushing:

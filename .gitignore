@@ -5,6 +5,7 @@
 
 # Local env
 .env
+.env.homeserver
 deploy.env
 .env.local
 .env.*.local

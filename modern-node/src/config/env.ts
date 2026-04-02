@@ -18,9 +18,19 @@ const toBoolean = (value: string | undefined, fallback: boolean): boolean => {
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: toNumber(process.env.API_PORT, 4000),
-  postgresUrl:
-    process.env.POSTGRES_URL ??
-    `postgresql://${process.env.POSTGRES_USER ?? 'insights_user'}:${process.env.POSTGRES_PASSWORD ?? 'insights_password'}@${process.env.POSTGRES_HOST ?? 'postgres'}:${process.env.POSTGRES_PORT ?? '5432'}/${process.env.POSTGRES_DB ?? 'realtime_insights'}`,
+  postgresUrl: (() => {
+    if (process.env.POSTGRES_URL) {
+      return process.env.POSTGRES_URL;
+    }
+
+    const user = encodeURIComponent(process.env.POSTGRES_USER ?? 'insights_user');
+    const password = encodeURIComponent(process.env.POSTGRES_PASSWORD ?? 'insights_password');
+    const host = process.env.POSTGRES_HOST ?? 'postgres';
+    const port = process.env.POSTGRES_PORT ?? '5432';
+    const database = process.env.POSTGRES_DB ?? 'realtime_insights';
+
+    return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+  })(),
   redisUrl: process.env.REDIS_URL ?? `redis://${process.env.REDIS_HOST ?? 'redis'}:${process.env.REDIS_PORT ?? '6379'}`,
   legacySyncUrl: process.env.LEGACY_SYNC_URL ?? 'http://legacy-yii:8080',
   corsAllowedOrigins: (process.env.CORS_ALLOWED_ORIGINS ?? '')
