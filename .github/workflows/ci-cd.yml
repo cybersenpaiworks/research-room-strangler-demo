@@ -1,0 +1,154 @@
+name: ci-cd
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: video-research-room-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Validate docker compose
+        run: docker compose config
+
+  php-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: Lint PHP files
+        run: find legacy-yii -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  backend-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modern-node
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint backend
+        run: npm run lint
+
+      - name: Test backend
+        run: npm run test
+
+      - name: Build backend
+        run: npm run build
+
+  frontend-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend-next
+    env:
+      NEXT_PUBLIC_API_GATEWAY_URL: http://localhost:8080
+      NEXT_PUBLIC_SOCKET_PATH: /socket.io
+      NEXT_PUBLIC_DEFAULT_SESSION_ID: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+  deploy-homeserver:
+    runs-on: ubuntu-latest
+    needs:
+      - validate-compose
+      - php-sanity
+      - backend-quality
+      - frontend-quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s' "${{ secrets.HOMESERVER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.HOMESERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Build deploy environment file
+        run: |
+          cat > deploy.env <<'EOF'
+          NEXT_PUBLIC_API_GATEWAY_URL=${{ secrets.PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SOCKET_PATH=/socket.io
+          NEXT_PUBLIC_DEFAULT_SESSION_ID=1
+          CORS_ALLOWED_ORIGINS=${{ secrets.CORS_ALLOWED_ORIGINS }}
+          TRUST_PROXY=true
+          GATEWAY_PORT=${{ secrets.GATEWAY_PORT }}
+          MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+          MYSQL_USER=${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+          LEGACY_SIMULATED_DELAY_MS=1200
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          VIDEO_TOKEN_SECRET=${{ secrets.VIDEO_TOKEN_SECRET }}
+          DEFAULT_SESSION_ID=1
+          EOF
+
+      - name: Sync project to homeserver
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            ./ \
+            '${{ secrets.HOMESERVER_USER }}@${{ secrets.HOMESERVER_HOST }}:${{ secrets.HOMESERVER_PATH }}/'
+          scp deploy.env '${{ secrets.HOMESERVER_USER }}@${{ secrets.HOMESERVER_HOST }}:${{ secrets.HOMESERVER_PATH }}/deploy.env'
+
+      - name: Deploy on homeserver via SSH
+        run: |
+          ssh '${{ secrets.HOMESERVER_USER }}@${{ secrets.HOMESERVER_HOST }}' '
+            set -e
+            cd "${{ secrets.HOMESERVER_PATH }}"
+            mv deploy.env .env
+            docker compose pull --ignore-pull-failures || true
+            docker compose up -d --build --remove-orphans
+            docker image prune -f
+          '

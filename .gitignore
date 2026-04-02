@@ -1,0 +1,27 @@
+# Node / Next.js
+**/node_modules
+**/.next
+**/dist
+
+# Local env
+.env
+deploy.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+.vscode
+.idea
+.codex
+tree.txt
+
+# Docker / DB artifacts
+mysql_data
+postgres_data
+redis_data
+
+# Keys / certs
+*.pem
+*.key
+*.crt
